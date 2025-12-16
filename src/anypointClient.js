@@ -82,6 +82,7 @@ function tryParseJson(stdout) {
 
 /**
  * Build name-based filter from pattern used in --app.
+ * Supports wildcard like "*eapi-dev" and raw regex like ".*-prod$".
  */
 export function buildAppNameFilter(pattern) {
   if (!pattern) return () => true;
@@ -105,7 +106,7 @@ export function buildAppNameFilter(pattern) {
 
 /**
  * CloudHub 2.0 helpers using runtime-mgr:application:* commands.[web:1]
- * Note: all operations require <appID>, which comes from runtime-mgr:application:list.[web:1]
+ * Note: start/stop require <appID>, returned by runtime-mgr:application:list.[web:1]
  */
 export const cloudhub2 = {
   async listApps() {
@@ -141,46 +142,15 @@ export const jobs = {
   },
 
   /**
-   * Start all apps whose NAMES match pattern, but pass their IDs to CLI.
-   * Pattern is matched against app.name/applicationName; app.id is used for start.[web:1]
+   * Start all apps whose NAMES match pattern, in parallel.
+   * Uses app.id for the CLI call and prints a summary once all Promises settle.[web:1]
    */
   async startMatching({ pattern } = {}) {
     const apps = await this.listApplications();
     const list = Array.isArray(apps) ? apps : apps.items || apps.data || [];
 
     const filterFn = buildAppNameFilter(pattern);
-    const failures = [];
-    let matched = 0;
-
-    for (const app of list) {
-      const id = app.id; // appID required by CLI[web:1]
-      const name = app.name || app.applicationName || id;
-      if (!id) continue; // must have ID to call CLI
-      if (!filterFn(app)) continue;
-
-      matched++;
-      console.log(`Starting app (id=${id}, name=${name})`);
-      try {
-        await cloudhub2.startAppById(id);
-      } catch (e) {
-        console.error(`Failed to start id=${id}, name=${name}: ${e.message}`);
-        failures.push({ id, name, error: e.message });
-      }
-    }
-
-    return { total: list.length, matched, failures };
-  },
-
-  /**
-   * Stop all apps whose NAMES match pattern, but pass their IDs to CLI.
-   */
-  async stopMatching({ pattern } = {}) {
-    const apps = await this.listApplications();
-    const list = Array.isArray(apps) ? apps : apps.items || apps.data || [];
-
-    const filterFn = buildAppNameFilter(pattern);
-    const failures = [];
-    let matched = 0;
+    const tasks = [];
 
     for (const app of list) {
       const id = app.id;
@@ -188,16 +158,82 @@ export const jobs = {
       if (!id) continue;
       if (!filterFn(app)) continue;
 
-      matched++;
-      console.log(`Stopping app (id=${id}, name=${name})`);
-      try {
-        await cloudhub2.stopAppById(id);
-      } catch (e) {
-        console.error(`Failed to stop id=${id}, name=${name}: ${e.message}`);
-        failures.push({ id, name, error: e.message });
-      }
+      tasks.push(
+        (async () => {
+          try {
+            await cloudhub2.startAppById(id);
+            return { id, name, status: "fulfilled" };
+          } catch (e) {
+            return { id, name, status: "rejected", reason: e.message };
+          }
+        })()
+      );
     }
 
-    return { total: list.length, matched, failures };
+    const results = await Promise.all(tasks);
+    const successes = results.filter((r) => r.status === "fulfilled");
+    const failures = results.filter((r) => r.status === "rejected");
+
+    console.log(
+      `Start completed. Success: ${successes.length}, Failures: ${failures.length}`
+    );
+    failures.forEach((f) =>
+      console.error(`Failed to start id=${f.id}, name=${f.name}: ${f.reason}`)
+    );
+
+    return {
+      total: list.length,
+      matched: results.length,
+      successes,
+      failures
+    };
+  },
+
+  /**
+   * Stop all apps whose NAMES match pattern, in parallel.
+   * Uses app.id for the CLI call and prints a summary once all Promises settle.[web:1]
+   */
+  async stopMatching({ pattern } = {}) {
+    const apps = await this.listApplications();
+    const list = Array.isArray(apps) ? apps : apps.items || apps.data || [];
+
+    const filterFn = buildAppNameFilter(pattern);
+    const tasks = [];
+
+    for (const app of list) {
+      const id = app.id;
+      const name = app.name || app.applicationName || id;
+      if (!id) continue;
+      if (!filterFn(app)) continue;
+
+      tasks.push(
+        (async () => {
+          try {
+            await cloudhub2.stopAppById(id);
+            return { id, name, status: "fulfilled" };
+          } catch (e) {
+            return { id, name, status: "rejected", reason: e.message };
+          }
+        })()
+      );
+    }
+
+    const results = await Promise.all(tasks);
+    const successes = results.filter((r) => r.status === "fulfilled");
+    const failures = results.filter((r) => r.status === "rejected");
+
+    console.log(
+      `Stop completed. Success: ${successes.length}, Failures: ${failures.length}`
+    );
+    failures.forEach((f) =>
+      console.error(`Failed to stop id=${f.id}, name=${f.name}: ${f.reason}`)
+    );
+
+    return {
+      total: list.length,
+      matched: results.length,
+      successes,
+      failures
+    };
   }
 };
