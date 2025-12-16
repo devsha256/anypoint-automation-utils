@@ -1,17 +1,30 @@
 // src/jobs/startAllApps.js
 import { jobs } from "../anypointClient.js";
 
+function parseArgs() {
+  const args = process.argv.slice(2);
+  let pattern = null;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--app" && args[i + 1]) {
+      pattern = args[i + 1];
+      i++;
+    }
+  }
+
+  return { pattern };
+}
+
 async function main() {
-  console.log("Starting all CloudHub 2.0 applications...");
+  const { pattern } = parseArgs();
+  console.log(
+    pattern
+      ? `Starting CloudHub 2.0 apps matching pattern: ${pattern}`
+      : "Starting ALL CloudHub 2.0 apps (no pattern passed)."
+  );
 
-  // Example filter: start only apps whose names start with "demo-"
-  const filterFn = (app) => {
-    const name = app.name || app.id || app.applicationName || "";
-    return name.startsWith("demo-");
-  };
-
-  const result = await jobs.startAll({ filterFn });
-  console.log("Start-all summary:", JSON.stringify(result, null, 2));
+  const result = await jobs.startMatching({ pattern });
+  console.log("Start-matching summary:", JSON.stringify(result, null, 2));
 }
 
 main().catch((err) => {

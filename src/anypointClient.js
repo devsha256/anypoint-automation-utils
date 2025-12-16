@@ -7,11 +7,8 @@ dotenv.config();
 
 const execAsync = promisify(exec);
 
-/**
- * Base command: local anypoint-cli-v4 binary, overridable via env.
- * NPM package exposes the CLI with flags like --bearer and CloudHub 2.0 commands.[web:2][web:26]
- */
-const BASE_CMD = process.env.ANYPOINT_CLI_CMD || "./node_modules/.bin/anypoint-cli-v4";
+const BASE_CMD =
+  process.env.ANYPOINT_CLI_CMD || "./node_modules/.bin/anypoint-cli-v4";
 
 function ensureBearer() {
   const bearer = process.env.ANYPOINT_BEARER_TOKEN || process.env.ANYPOINT_BEARER;
@@ -21,20 +18,12 @@ function ensureBearer() {
   return bearer;
 }
 
-/**
- * Run Anypoint CLI with bearer token and common flags (org, env).
- * CloudHub 2.0 commands support listing, starting, stopping applications, and more.[web:26]
- */
 async function runCli(args, options = {}) {
   const bearer = ensureBearer();
   const orgId = process.env.ANYPOINT_ORG_ID;
   const envName = process.env.ANYPOINT_ENVIRONMENT;
 
-  const fullArgs = [
-    ...args,
-    "--bearer",
-    `"${bearer}"`
-  ];
+  const fullArgs = [...args, "--bearer", `"${bearer}"`];
 
   if (orgId) {
     fullArgs.push("--organization", `"${orgId}"`);
@@ -66,17 +55,44 @@ function tryParseJson(stdout) {
 }
 
 /**
- * CloudHub 2.0 helper.
- * Uses the CloudHub 2.0 command group from the CLI command list.[web:26]
+ * Build a predicate from a pattern string.
+ * Examples:
+ *  "*eapi-dev"  -> matches names ending with "eapi-dev"
+ *  "eapi-*-dev" -> typical wildcard
+ *  ".*-prod$"   -> treated as regex
+ */
+export function buildAppNameFilter(pattern) {
+  if (!pattern) {
+    return () => true;
+  }
+
+  // If pattern looks like a regex (contains ^, $, or unescaped . or |), use it directly
+  const looksLikeRegex = /[\^\$\|\+\?\(\)\[\]\\]/.test(pattern);
+  let regex;
+
+  if (looksLikeRegex) {
+    regex = new RegExp(pattern);
+  } else {
+    // Treat as wildcard: * -> .*, ? -> .
+    const escaped = pattern.replace(/[-/\\^$+?.()|[\]{}]/g, "\\$&");
+    const wildcard = escaped.replace(/\\\*/g, ".*").replace(/\\\?/g, ".");
+    regex = new RegExp(`^${wildcard}$`);
+  }
+
+  return (app) => {
+    const name = app.name || app.id || app.applicationName || "";
+    return regex.test(name);
+  };
+}
+
+/**
+ * CloudHub 2.0 helpers using runtime-mgr:application:* command group.[web:22][web:40]
+ * These commands support listing all apps and starting/stopping them.[web:40]
  */
 export const cloudhub2 = {
-  /**
-   * List CloudHub 2.0 applications in the organization.
-   * Uses: cloudhub2:applications:list --output json.[web:26]
-   */
   async listApps() {
     const { stdout } = await runCli([
-      "cloudhub2:applications:list",
+      "runtime-mgr:application:list",
       "--output",
       "json"
     ]);
@@ -84,25 +100,17 @@ export const cloudhub2 = {
     return json ?? stdout;
   },
 
-  /**
-   * Start a CloudHub 2.0 application by ID or name.
-   * Uses: cloudhub2:applications:start <app>.[web:26]
-   */
   async startApp(idOrName) {
     const { stdout } = await runCli([
-      "cloudhub2:applications:start",
+      "runtime-mgr:application:start",
       idOrName
     ]);
     return stdout;
   },
 
-  /**
-   * Stop a CloudHub 2.0 application by ID or name.
-   * Uses: cloudhub2:applications:stop <app>.[web:26]
-   */
   async stopApp(idOrName) {
     const { stdout } = await runCli([
-      "cloudhub2:applications:stop",
+      "runtime-mgr:application:stop",
       idOrName
     ]);
     return stdout;
@@ -110,31 +118,31 @@ export const cloudhub2 = {
 };
 
 /**
- * Higher-level automation jobs for CloudHub 2.0.
+ * High-level jobs for CloudHub 2.0.
  */
 export const jobs = {
-  /**
-   * Get list of CloudHub 2.0 applications.
-   */
   async listApplications() {
     return cloudhub2.listApps();
   },
 
   /**
-   * Start all CloudHub 2.0 apps, optionally filtered.
-   * filterFn(app) => boolean; if provided, only apps where it returns true are started.
+   * Start all apps whose names match a pattern.
+   * @param {string} pattern - wildcard/regex for app name (e.g. "*eapi-dev").
    */
-  async startAll({ filterFn = null } = {}) {
+  async startMatching({ pattern } = {}) {
     const apps = await this.listApplications();
     const list = Array.isArray(apps) ? apps : apps.items || apps.data || [];
 
+    const filterFn = buildAppNameFilter(pattern);
     const failures = [];
+    let matched = 0;
 
     for (const app of list) {
       const name = app.name || app.id || app.applicationName;
       if (!name) continue;
-      if (filterFn && !filterFn(app)) continue;
+      if (!filterFn(app)) continue;
 
+      matched++;
       console.log(`Starting app: ${name}`);
       try {
         await cloudhub2.startApp(name);
@@ -144,24 +152,27 @@ export const jobs = {
       }
     }
 
-    return { total: list.length, failures };
+    return { total: list.length, matched, failures };
   },
 
   /**
-   * Stop all CloudHub 2.0 apps, optionally filtered.
-   * filterFn(app) => boolean; if provided, only apps where it returns true are stopped.
+   * Stop all apps whose names match a pattern.
+   * @param {string} pattern - wildcard/regex for app name.
    */
-  async stopAll({ filterFn = null } = {}) {
+  async stopMatching({ pattern } = {}) {
     const apps = await this.listApplications();
     const list = Array.isArray(apps) ? apps : apps.items || apps.data || [];
 
+    const filterFn = buildAppNameFilter(pattern);
     const failures = [];
+    let matched = 0;
 
     for (const app of list) {
       const name = app.name || app.id || app.applicationName;
       if (!name) continue;
-      if (filterFn && !filterFn(app)) continue;
+      if (!filterFn(app)) continue;
 
+      matched++;
       console.log(`Stopping app: ${name}`);
       try {
         await cloudhub2.stopApp(name);
@@ -171,6 +182,6 @@ export const jobs = {
       }
     }
 
-    return { total: list.length, failures };
+    return { total: list.length, matched, failures };
   }
 };

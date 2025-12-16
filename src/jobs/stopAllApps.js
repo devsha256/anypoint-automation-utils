@@ -1,17 +1,30 @@
 // src/jobs/stopAllApps.js
 import { jobs } from "../anypointClient.js";
 
+function parseArgs() {
+  const args = process.argv.slice(2);
+  let pattern = null;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--app" && args[i + 1]) {
+      pattern = args[i + 1];
+      i++;
+    }
+  }
+
+  return { pattern };
+}
+
 async function main() {
-  console.log("Stopping all CloudHub 2.0 applications...");
+  const { pattern } = parseArgs();
+  console.log(
+    pattern
+      ? `Stopping CloudHub 2.0 apps matching pattern: ${pattern}`
+      : "Stopping ALL CloudHub 2.0 apps (no pattern passed)."
+  );
 
-  // Example filter: stop everything except apps labeled "always-on"
-  const filterFn = (app) => {
-    const labels = app.labels || app.tags || [];
-    return !labels.includes("always-on");
-  };
-
-  const result = await jobs.stopAll({ filterFn });
-  console.log("Stop-all summary:", JSON.stringify(result, null, 2));
+  const result = await jobs.stopMatching({ pattern });
+  console.log("Stop-matching summary:", JSON.stringify(result, null, 2));
 }
 
 main().catch((err) => {

@@ -1,0 +1,16 @@
+{
+  "name": "anypoint-automation-utils",
+  "version": "1.0.0",
+  "description": "Node utilities that wrap Anypoint CLI v4 to automate common Anypoint Platform tasks.",
+  "main": "src/anypointClient.js",
+  "type": "module",
+  "scripts": {
+    "list-apps": "node src/jobs/listApps.js",
+    "start-all-apps": "node src/jobs/startAllApps.js",
+    "stop-all-apps": "node src/jobs/stopAllApps.js"
+  },
+  "dependencies": {
+    "anypoint-cli-v4": "^1.6.14",
+    "dotenv": "^16.4.5"
+  }
+}
