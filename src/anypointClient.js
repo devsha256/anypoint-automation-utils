@@ -1,6 +1,6 @@
 // src/anypointClient.js
 import dotenv from "dotenv";
-import spawn from "cross-spawn"; // cross-platform spawn wrapper[web:91]
+import spawn from "cross-spawn"; // cross-platform spawn wrapper[web:2]
 
 dotenv.config();
 
@@ -14,7 +14,7 @@ function ensureBearer() {
 
 /**
  * Run Anypoint CLI via `npx anypoint-cli-v4 ...`
- * cross-spawn + npx works on Windows and Unix.[web:78][web:91]
+ * This works on Windows and Unix when anypoint-cli-v4 is a local dependency.[web:2][web:88]
  */
 function runCli(args, options = {}) {
   const bearer = ensureBearer();
@@ -81,7 +81,7 @@ function tryParseJson(stdout) {
 }
 
 /**
- * Pattern builder for --app
+ * Build name-based filter from pattern used in --app.
  */
 export function buildAppNameFilter(pattern) {
   if (!pattern) return () => true;
@@ -98,13 +98,14 @@ export function buildAppNameFilter(pattern) {
   }
 
   return (app) => {
-    const name = app.name || app.id || app.applicationName || "";
+    const name = app.name || app.applicationName || "";
     return regex.test(name);
   };
 }
 
 /**
- * CloudHub 2.0 helpers using Runtime Manager application commands.[web:22][web:40]
+ * CloudHub 2.0 helpers using runtime-mgr:application:* commands.[web:1]
+ * Note: all operations require <appID>, which comes from runtime-mgr:application:list.[web:1]
  */
 export const cloudhub2 = {
   async listApps() {
@@ -117,18 +118,18 @@ export const cloudhub2 = {
     return json ?? stdout;
   },
 
-  async startApp(idOrName) {
+  async startAppById(appId) {
     const { stdout } = await runCli([
       "runtime-mgr:application:start",
-      idOrName
+      appId
     ]);
     return stdout;
   },
 
-  async stopApp(idOrName) {
+  async stopAppById(appId) {
     const { stdout } = await runCli([
       "runtime-mgr:application:stop",
-      idOrName
+      appId
     ]);
     return stdout;
   }
@@ -139,6 +140,10 @@ export const jobs = {
     return cloudhub2.listApps();
   },
 
+  /**
+   * Start all apps whose NAMES match pattern, but pass their IDs to CLI.
+   * Pattern is matched against app.name/applicationName; app.id is used for start.[web:1]
+   */
   async startMatching({ pattern } = {}) {
     const apps = await this.listApplications();
     const list = Array.isArray(apps) ? apps : apps.items || apps.data || [];
@@ -148,23 +153,27 @@ export const jobs = {
     let matched = 0;
 
     for (const app of list) {
-      const name = app.name || app.id || app.applicationName;
-      if (!name) continue;
+      const id = app.id; // appID required by CLI[web:1]
+      const name = app.name || app.applicationName || id;
+      if (!id) continue; // must have ID to call CLI
       if (!filterFn(app)) continue;
 
       matched++;
-      console.log(`Starting app: ${name}`);
+      console.log(`Starting app (id=${id}, name=${name})`);
       try {
-        await cloudhub2.startApp(name);
+        await cloudhub2.startAppById(id);
       } catch (e) {
-        console.error(`Failed to start ${name}: ${e.message}`);
-        failures.push({ name, error: e.message });
+        console.error(`Failed to start id=${id}, name=${name}: ${e.message}`);
+        failures.push({ id, name, error: e.message });
       }
     }
 
     return { total: list.length, matched, failures };
   },
 
+  /**
+   * Stop all apps whose NAMES match pattern, but pass their IDs to CLI.
+   */
   async stopMatching({ pattern } = {}) {
     const apps = await this.listApplications();
     const list = Array.isArray(apps) ? apps : apps.items || apps.data || [];
@@ -174,17 +183,18 @@ export const jobs = {
     let matched = 0;
 
     for (const app of list) {
-      const name = app.name || app.id || app.applicationName;
-      if (!name) continue;
+      const id = app.id;
+      const name = app.name || app.applicationName || id;
+      if (!id) continue;
       if (!filterFn(app)) continue;
 
       matched++;
-      console.log(`Stopping app: ${name}`);
+      console.log(`Stopping app (id=${id}, name=${name})`);
       try {
-        await cloudhub2.stopApp(name);
+        await cloudhub2.stopAppById(id);
       } catch (e) {
-        console.error(`Failed to stop ${name}: ${e.message}`);
-        failures.push({ name, error: e.message });
+        console.error(`Failed to stop id=${id}, name=${name}: ${e.message}`);
+        failures.push({ id, name, error: e.message });
       }
     }
 
