@@ -1,16 +1,20 @@
 {
-  "name": "anypoint-automation-utils",
+  "name": "cloudhub2-automation",
   "version": "1.0.0",
-  "description": "Node utilities that wrap Anypoint CLI v4 to automate common Anypoint Platform tasks.",
-  "main": "src/anypointClient.js",
+  "description": "Node utilities that wrap Anypoint CLI v4 CloudHub 2.0 commands to automate Runtime Manager tasks (list, start, stop with patterns).",
   "type": "module",
+  "main": "src/anypointClient.js",
   "scripts": {
     "list-apps": "node src/jobs/listApps.js",
     "start-all-apps": "node src/jobs/startAllApps.js",
     "stop-all-apps": "node src/jobs/stopAllApps.js"
   },
   "dependencies": {
-    "anypoint-cli-v4": "^1.6.14",
+    "anypoint-cli-v4": "^1.6.12",
+    "cross-spawn": "^7.0.3",
     "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

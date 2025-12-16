@@ -1,11 +1,8 @@
 // src/anypointClient.js
-import { spawn } from "node:child_process";
 import dotenv from "dotenv";
+import spawn from "cross-spawn"; // cross-platform spawn wrapper[web:91]
 
 dotenv.config();
-
-const BASE_CMD =
-  process.env.ANYPOINT_CLI_CMD || "./node_modules/.bin/anypoint-cli-v4";
 
 function ensureBearer() {
   const bearer = process.env.ANYPOINT_BEARER_TOKEN || process.env.ANYPOINT_BEARER;
@@ -15,23 +12,31 @@ function ensureBearer() {
   return bearer;
 }
 
+/**
+ * Run Anypoint CLI via `npx anypoint-cli-v4 ...`
+ * cross-spawn + npx works on Windows and Unix.[web:78][web:91]
+ */
 function runCli(args, options = {}) {
   const bearer = ensureBearer();
   const orgId = process.env.ANYPOINT_ORG_ID;
   const envName = process.env.ANYPOINT_ENVIRONMENT;
 
-  const finalArgs = [...args, "--bearer", bearer];
+  const cliArgs = [
+    "anypoint-cli-v4",
+    ...args,
+    "--bearer",
+    bearer
+  ];
 
   if (orgId) {
-    finalArgs.push("--organization", orgId);
+    cliArgs.push("--organization", orgId);
   }
   if (envName) {
-    finalArgs.push("--environment", envName);
+    cliArgs.push("--environment", envName);
   }
 
   return new Promise((resolve, reject) => {
-    const child = spawn(BASE_CMD, finalArgs, {
-      shell: false, // important for Windows
+    const child = spawn("npx", cliArgs, {
       stdio: ["ignore", "pipe", "pipe"],
       ...options
     });
@@ -47,16 +52,13 @@ function runCli(args, options = {}) {
       stderr += data.toString();
     });
 
-    child.on("error", (err) => {
-      reject(err);
-    });
+    child.on("error", (err) => reject(err));
 
     child.on("close", (code) => {
       if (code !== 0) {
         const err = new Error(
           `anypoint-cli-v4 exited with code ${code}\n${stderr}`
         );
-        // surface captured stderr
         err.code = code;
         err.stderr = stderr;
         err.stdout = stdout;
@@ -78,11 +80,11 @@ function tryParseJson(stdout) {
   }
 }
 
-// keep your buildAppNameFilter as-is
+/**
+ * Pattern builder for --app
+ */
 export function buildAppNameFilter(pattern) {
-  if (!pattern) {
-    return () => true;
-  }
+  if (!pattern) return () => true;
 
   const looksLikeRegex = /[\^\$\|\+\?\(\)\[\]\\]/.test(pattern);
   let regex;
@@ -101,7 +103,9 @@ export function buildAppNameFilter(pattern) {
   };
 }
 
-// CloudHub 2.0 helpers (same commands as before)
+/**
+ * CloudHub 2.0 helpers using Runtime Manager application commands.[web:22][web:40]
+ */
 export const cloudhub2 = {
   async listApps() {
     const { stdout } = await runCli([
